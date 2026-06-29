@@ -50,13 +50,58 @@ const frameworks = [
   },
 ];
 
-const moods = [
-  { emoji: "😔", label: "Heavy" },
-  { emoji: "😟", label: "Tense" },
-  { emoji: "😐", label: "Steady" },
-  { emoji: "🙂", label: "Light" },
-  { emoji: "😊", label: "Bright" },
+const moodBlueprints = [
+  {
+    label: "heavy",
+    emoji: "😔",
+    title: "Compassionate Sanctuary",
+    directive: "Provide deep care, emotional validation, and supportive listening. Do not rush to fix problems; hold space and be incredibly gentle.",
+    badge: "Care & Support",
+    themeColor: "from-blue-500/20 to-indigo-500/20 text-blue-400 border-blue-500/30",
+    description: "Solace will adopt a slow, deeply comforting, and non-demanding presence to help you carry the weight."
+  },
+  {
+    label: "tense",
+    emoji: "😟",
+    title: "Positive Grounding & Motivation",
+    directive: "Deliver high positivity, grounding exercises, and motivational reframes. Focus on relief, safety, and encouragement.",
+    badge: "Motivational Boost",
+    themeColor: "from-amber-500/20 to-orange-500/20 text-amber-400 border-amber-500/30",
+    description: "Solace will provide positive, warm motivation and grounding techniques to ease the tension."
+  },
+  {
+    label: "steady",
+    emoji: "😐",
+    title: "Balanced Perspective",
+    directive: "Maintain an objective, grounded stance. Reflect on both positive aspects and slight real-world challenges (constructive realism).",
+    badge: "Objective Reality",
+    themeColor: "from-emerald-500/20 to-teal-500/20 text-emerald-400 border-emerald-500/30",
+    description: "Solace will keep it real—balanced insights recognizing both stability and subtle areas for growth."
+  },
+  {
+    label: "light",
+    emoji: "🙂",
+    title: "Uplifting Flow",
+    directive: "Respond with warmth and lighthearted energy. Focus on maintaining momentum and finding small moments of gratitude.",
+    badge: "Warm Presence",
+    themeColor: "from-cyan-500/20 to-teal-500/20 text-cyan-400 border-cyan-500/30",
+    description: "Solace will mirror your lightheartedness and guide you to sustain this peaceful state."
+  },
+  {
+    label: "bright",
+    emoji: "😊",
+    title: "Generous Catalyst",
+    directive: "Celebrate your energy. Prompt reflection on how to channel this positive state to overcome future challenges or share/give positive energy to others.",
+    badge: "Share the Glow",
+    themeColor: "from-pink-500/20 to-rose-500/20 text-pink-400 border-pink-500/30",
+    description: "Solace will help you channel your vibrancy to overcome blockages and share positive energy with others."
+  }
 ];
+
+const moods = moodBlueprints.map(b => ({
+  emoji: b.emoji,
+  label: b.label.charAt(0).toUpperCase() + b.label.slice(1)
+}));
 
 const LS_KEY = "solace.state.v1";
 
@@ -159,41 +204,76 @@ function Portal() {
   const wipeVoiceflow = () => {
     try {
       const vf = (window as any).voiceflow?.chat;
+      try { vf?.reset?.(); } catch {}
       try { vf?.clear?.(); } catch {}
       try { vf?.proactive?.clear?.(); } catch {}
     } catch {}
   };
 
-  // Destroy + reload the Voiceflow widget with the live mood/energy payload, then force-open it.
-  const handleMoodUpdate = (currentMood: string, currentEnergyLevel: number) => {
+  // Dynamically update the Voiceflow widget with mood/energy payload without destroying the widget unless necessary.
+  const handleMoodUpdate = (
+    currentMood: string,
+    currentEnergyLevel: number,
+    directive: string,
+    options: { forceRestart?: boolean; openChat?: boolean } = {}
+  ) => {
     try {
       const vf = (window as any).voiceflow?.chat;
-      if (!vf?.load) return;
+      if (!vf) return;
 
-      // Clear any existing chat instance to force a fresh session
-      try { vf.destroy?.(); } catch {}
+      // Update variables so the chatbot knows them
+      if (typeof vf.setVariables === "function") {
+        try {
+          vf.setVariables({
+            user_mood: currentMood,
+            user_energy: currentEnergyLevel,
+            ai_directive: directive,
+          });
+        } catch (err) {
+          console.warn("Could not set Voiceflow variables:", err);
+        }
+      }
 
-      // Re-load the widget passing the live payload variables
-      vf.load({
-        verify: { projectID: "6a41495a4ae39787070bd525" },
-        url: "https://general-runtime.voiceflow.com",
-        voice: { url: "https://runtime-api.voiceflow.com" },
-        launch: {
-          event: {
-            type: "launch",
-            payload: {
-              user_mood: currentMood,
-              user_energy: currentEnergyLevel,
-            },
-          },
-        },
-      });
+      if (options.forceRestart) {
+        // Clear any existing chat instance to force a fresh session
+        if (typeof vf.reset === "function") {
+          try {
+            vf.reset();
+          } catch (err) {
+            console.warn("Could not reset Voiceflow session:", err);
+          }
+        }
 
-      // Force open the chat bubble immediately
-      window.setTimeout(() => {
-        try { (window as any).voiceflow?.chat?.open?.(); } catch {}
-      }, 500);
-    } catch {}
+        // Trigger a fresh launch event with the payload variables
+        if (typeof vf.interact === "function") {
+          try {
+            vf.interact({
+              type: "launch",
+              payload: {
+                user_mood: currentMood,
+                user_energy: currentEnergyLevel,
+                ai_directive: directive,
+              },
+            });
+          } catch (err) {
+            console.warn("Could not send launch event to Voiceflow:", err);
+          }
+        }
+      }
+
+      // Open the chat bubble if requested
+      if (options.openChat && typeof vf.open === "function") {
+        window.setTimeout(() => {
+          try {
+            vf.open();
+          } catch (err) {
+            console.warn("Could not open Voiceflow chat widget:", err);
+          }
+        }, 300);
+      }
+    } catch (err) {
+      console.error("Error updating Voiceflow state:", err);
+    }
   };
 
   const handleZeroLog = (v: boolean) => {
@@ -209,25 +289,19 @@ function Portal() {
 
   const handleMoodSelect = (i: number) => {
     setMood(i);
-    const label = moods[i]?.label?.toLowerCase() ?? "steady";
-    handleMoodUpdate(label, energy[0]);
-    showFlash(`Mood set · ${label}`);
+    const label = moods[i]?.label ?? "Steady";
+    showFlash(`Selected mood · ${label}`);
   };
 
   const handleEnergyChange = (v: number[]) => {
     setEnergy(v);
   };
 
-  // Debounce energy → Voiceflow widget reload so we don't destroy on every tick.
-  useEffect(() => {
-    if (!hydrated) return;
-    const t = window.setTimeout(() => {
-      const label = moods[mood]?.label?.toLowerCase() ?? "steady";
-      handleMoodUpdate(label, energy[0]);
-    }, 600);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [energy, hydrated]);
+  const handleSyncWithAI = () => {
+    const bp = moodBlueprints[mood];
+    handleMoodUpdate(bp.label, energy[0], bp.directive, { forceRestart: true, openChat: true });
+    showFlash(`Syncing Solace AI · ${bp.badge}`);
+  };
 
   const handleAnonRoute = (v: boolean) => {
     setAnonRoute(v);
@@ -360,7 +434,14 @@ function Portal() {
                 Solace is a private digital sanctuary — encrypted, judgment-free, and always listening for what you actually need.
               </p>
               <div className="relative mt-7 flex flex-wrap gap-3">
-                <button className="group inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition hover:-translate-y-0.5">
+                <button
+                  onClick={() => {
+                    const bp = moodBlueprints[mood];
+                    handleMoodUpdate(bp.label, energy[0], bp.directive, { forceRestart: true, openChat: true });
+                    showFlash(`Syncing Solace AI · ${bp.badge}`);
+                  }}
+                  className="group inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/20 transition hover:-translate-y-0.5"
+                >
                   Start reflecting
                   <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
                 </button>
@@ -442,11 +523,11 @@ function Portal() {
                     key={m.label}
                     onClick={() => handleMoodSelect(i)}
                     className={`flex flex-1 flex-col items-center gap-1 rounded-xl py-2 transition ${
-                      mood === i ? "bg-primary/15 scale-105" : "hover:bg-card/60"
+                      mood === i ? "bg-primary/15 scale-105 font-medium" : "hover:bg-card/60"
                     }`}
                   >
                     <span className="text-2xl">{m.emoji}</span>
-                    <span className={`text-[10px] uppercase tracking-wide ${mood === i ? "text-primary" : "text-muted-foreground"}`}>
+                    <span className={`text-[10px] uppercase tracking-wide ${mood === i ? "text-primary font-semibold" : "text-muted-foreground"}`}>
                       {m.label}
                     </span>
                   </button>
@@ -471,6 +552,37 @@ function Portal() {
                   <span>vibrant</span>
                 </div>
               </div>
+            </div>
+
+            {/* AI BLUEPRINT PREVIEW & SEND BUTTON */}
+            <div className="mt-6 border-t border-border/40 pt-6 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="flex-1 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-semibold border bg-gradient-to-r ${moodBlueprints[mood].themeColor}`}>
+                    <Sparkle className="h-3 w-3 animate-pulse" />
+                    {moodBlueprints[mood].badge}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">Solace AI Blueprint</span>
+                </div>
+                <h3 className="font-serif text-lg leading-none">{moodBlueprints[mood].title}</h3>
+                <p className="text-xs text-muted-foreground max-w-xl leading-relaxed">
+                  {moodBlueprints[mood].description}
+                </p>
+              </div>
+
+              <button
+                onClick={handleSyncWithAI}
+                className="w-full md:w-auto group relative inline-flex items-center justify-center gap-3 rounded-2xl bg-primary px-8 py-4 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:shadow-primary/30"
+              >
+                <div className="absolute inset-0 rounded-2xl bg-primary/20 opacity-0 group-hover:opacity-100 transition duration-300 blur" />
+                <span className="relative flex items-center gap-2">
+                  Send to AI Companion
+                  <span className="inline-flex h-5 items-center justify-center rounded-lg bg-primary-foreground/15 px-2 text-[10px] uppercase font-mono">
+                    {moodBlueprints[mood].emoji} {energy[0]}%
+                  </span>
+                </span>
+                <ArrowRight className="relative h-4 w-4 transition group-hover:translate-x-0.5" strokeWidth={2.2} />
+              </button>
             </div>
           </section>
 
